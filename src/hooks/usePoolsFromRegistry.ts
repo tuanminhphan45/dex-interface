@@ -89,18 +89,128 @@ export function usePoolsFromRegistry() {
   return useQuery({
     queryKey: ['poolsFromRegistry', REGISTRY_ID],
     queryFn: async (): Promise<PoolData[]> => {
-      // TODO: Implement this function
-      // Return an empty array for now
-      console.log('TODO: Implement usePoolsFromRegistry');
-      console.log('Available client:', client);
-      console.log('Registry ID:', REGISTRY_ID);
+      try {
+        // Get registry object to check pool_count
+        const registryObj = await client.getObject({
+          id: REGISTRY_ID,
+          options: { showContent: true },
+        });
 
-      return [];
+        if (!registryObj.data?.content || registryObj.data.content.dataType !== 'moveObject') {
+          console.log('Registry not found or invalid');
+          return [];
+        }
+
+        const registryFields = registryObj.data.content.fields as {
+          pool_count: string;
+          pools: { fields: { id: { id: string } } };
+        };
+
+        const poolCount = parseInt(registryFields.pool_count);
+        console.log('Pool count from registry:', poolCount);
+
+        if (poolCount === 0) {
+          return [];
+        }
+
+        // Get dynamic fields from the pools table
+        const tableId = registryFields.pools.fields.id.id;
+        const dynamicFields = await client.getDynamicFields({
+          parentId: tableId,
+        });
+
+        console.log('Dynamic fields:', dynamicFields.data);
+
+        const pools: PoolData[] = [];
+
+        // Fetch each pool info from dynamic fields
+        for (const field of dynamicFields.data) {
+          try {
+            // Get the dynamic field content (PoolInfo)
+            const fieldObj = await client.getDynamicFieldObject({
+              parentId: tableId,
+              name: field.name,
+            });
+
+            if (!fieldObj.data?.content || fieldObj.data.content.dataType !== 'moveObject') {
+              continue;
+            }
+
+            const poolInfoFields = fieldObj.data.content.fields as {
+              name: { fields: { type_x: { fields: { name: string } }; type_y: { fields: { name: string } } } };
+              value: { fields: { pool_id: string; created_at: string; is_active: boolean } };
+            };
+
+            // Pool ID from PoolInfo - handle both string and object formats
+            const rawPoolId = poolInfoFields.value.fields.pool_id;
+            // If pool_id is an object with 'id' field, extract it
+            const poolId = typeof rawPoolId === 'object' && rawPoolId !== null && 'id' in rawPoolId
+              ? (rawPoolId as { id: string }).id
+              : rawPoolId as string;
+
+            console.log('Registry pool entry:', { rawPoolId, poolId });
+
+            // Validate pool ID format (should be 0x followed by 64 hex chars)
+            const isValidPoolId = typeof poolId === 'string' && /^0x[a-fA-F0-9]{64}$/.test(poolId);
+            if (!isValidPoolId) {
+              console.warn('Skipping pool with invalid ID:', poolId);
+              continue;
+            }
+
+            const createdAt = parseInt(poolInfoFields.value.fields.created_at);
+            const isActive = poolInfoFields.value.fields.is_active;
+
+            // Get the pool key (type names)
+            const typeX = poolInfoFields.name.fields.type_x.fields.name;
+            const typeY = poolInfoFields.name.fields.type_y.fields.name;
+
+            // Fetch actual pool object to get reserves
+            const poolObj = await client.getObject({
+              id: poolId,
+              options: { showContent: true, showType: true },
+            });
+
+            if (!poolObj.data?.content || poolObj.data.content.dataType !== 'moveObject') {
+              continue;
+            }
+
+            const poolFields = poolObj.data.content.fields as unknown as PoolContent;
+            const poolType = poolObj.data.type || '';
+
+            // Extract type arguments from pool type
+            const typeArgs = extractPoolTypeArgs(poolType);
+            const actualTypeX = typeArgs?.[0] || typeX;
+            const actualTypeY = typeArgs?.[1] || typeY;
+
+            pools.push({
+              id: poolId,
+              tokenX: parseTypeToToken(actualTypeX),
+              tokenY: parseTypeToToken(actualTypeY),
+              typeX: actualTypeX,
+              typeY: actualTypeY,
+              reserveX: poolFields.balance_x || '0',
+              reserveY: poolFields.balance_y || '0',
+              lpSupply: poolFields.lp_supply?.value || '0',
+              feeBps: parseInt(poolFields.fee_bps || '30'),
+              isActive,
+              createdAt,
+            });
+          } catch (err) {
+            console.error('Error fetching pool:', err);
+          }
+        }
+
+        return pools;
+      } catch (error) {
+        console.error('Error fetching pools from registry:', error);
+        return [];
+      }
     },
     refetchInterval: 15000,
     staleTime: 10000,
   });
 }
+
 
 /*
  * ============================================================

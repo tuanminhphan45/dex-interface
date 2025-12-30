@@ -25,12 +25,16 @@ function calculateOutputAmount(
   reserveIn: string,
   reserveOut: string
 ): string {
-  // TODO: Implement constant product AMM formula
-  // Hint: dy = y * dx * (1 - fee) / (x + dx * (1 - fee))
-  console.log('TODO: Implement calculateOutputAmount');
-  console.log('Input:', inputAmount, 'ReserveIn:', reserveIn, 'ReserveOut:', reserveOut);
-  console.log('Fee:', SWAP_FEE);
-  return '0';
+  const amountIn = parseFloat(inputAmount);
+  const resIn = parseFloat(reserveIn);
+  const resOut = parseFloat(reserveOut);
+
+  if (amountIn <= 0 || resIn <= 0 || resOut <= 0) return '0';
+
+  const amountInWithFee = amountIn * (1 - SWAP_FEE);
+  const outputAmount = (resOut * amountInWithFee) / (resIn + amountInWithFee);
+
+  return outputAmount.toFixed(8);
 }
 
 function calculatePriceImpact(
@@ -39,12 +43,14 @@ function calculatePriceImpact(
   reserveIn: string,
   reserveOut: string
 ): number {
-  // TODO: Implement price impact calculation
-  // Hint: Compare spot price (reserveOut/reserveIn) with actual price (outputAmount/inputAmount)
-  console.log('TODO: Implement calculatePriceImpact');
-  console.log('Input:', inputAmount, 'Output:', outputAmount);
-  console.log('ReserveIn:', reserveIn, 'ReserveOut:', reserveOut);
-  return 0;
+  const resIn = parseFloat(reserveIn);
+  const resOut = parseFloat(reserveOut);
+  const spotPrice = resOut / resIn;
+
+  const actualPrice = parseFloat(outputAmount) / parseFloat(inputAmount);
+  const impact = ((spotPrice - actualPrice) / spotPrice) * 100;
+
+  return Math.max(0, impact);
 }
 
 /*
@@ -117,34 +123,36 @@ export function useSwapQuote(
         return null;
       }
 
-      // TODO: Implement swap quote calculation
-      // You'll need to:
-      // 1. Get the pool using getPoolByTokens(inputToken.address, outputToken.address)
-      // 2. Calculate output using calculateOutputAmount()
-      // 3. Calculate price impact using calculatePriceImpact()
-
       const pool = getPoolByTokens(inputToken.address, outputToken.address);
-      if (!pool) {
-        console.log('No pool found for', inputToken.symbol, '/', outputToken.symbol);
-        return null;
-      }
+      if (!pool) return null;
 
-      // Placeholder: call the helper functions so workshop attendees know they exist
-      const outputAmount = calculateOutputAmount('0', '0', '0');
-      const priceImpact = calculatePriceImpact('0', '0', '0', '0');
+      const isTokenAInput = pool.tokenA.address === inputToken.address;
+      const reserveIn = isTokenAInput ? pool.reserveA : pool.reserveB;
+      const reserveOut = isTokenAInput ? pool.reserveB : pool.reserveA;
 
-      console.log('TODO: Implement useSwapQuote properly');
-      console.log('Pool found:', pool);
-      console.log('Placeholder output:', outputAmount, 'impact:', priceImpact);
+      const scaledInput = (parseFloat(inputAmount) * Math.pow(10, inputToken.decimals)).toString();
+      const outputAmount = calculateOutputAmount(scaledInput, reserveIn, reserveOut);
+      const displayOutput = (parseFloat(outputAmount) / Math.pow(10, outputToken.decimals)).toFixed(6);
 
-      // Return null until implemented
-      return null;
+      const priceImpact = calculatePriceImpact(scaledInput, outputAmount, reserveIn, reserveOut);
+      const fee = (parseFloat(inputAmount) * SWAP_FEE).toFixed(6);
+
+      return {
+        inputToken,
+        outputToken,
+        inputAmount,
+        outputAmount: displayOutput,
+        priceImpact,
+        fee,
+        route: [inputToken.symbol, outputToken.symbol],
+      };
     },
     enabled: !!inputToken && !!outputToken && !!inputAmount && parseFloat(inputAmount) > 0,
     refetchInterval: 5000,
     staleTime: 2000,
   });
 }
+
 
 /*
  * ============================================================
@@ -219,17 +227,26 @@ export function useSwapRate(tokenA?: Token, tokenB?: Token) {
     queryFn: async () => {
       if (!tokenA || !tokenB) return null;
 
-      // TODO: Implement swap rate calculation
-      console.log('TODO: Implement useSwapRate');
-      console.log('Token A:', tokenA.symbol);
-      console.log('Token B:', tokenB.symbol);
+      const pool = getPoolByTokens(tokenA.address, tokenB.address);
+      if (!pool) return null;
 
-      return null;
+      const isTokenAFirst = pool.tokenA.address === tokenA.address;
+      const reserveA = parseFloat(isTokenAFirst ? pool.reserveA : pool.reserveB);
+      const reserveB = parseFloat(isTokenAFirst ? pool.reserveB : pool.reserveA);
+
+      const decimalDiff = tokenB.decimals - tokenA.decimals;
+      const rate = (reserveB / reserveA) * Math.pow(10, decimalDiff);
+
+      return {
+        rate,
+        formatted: `1 ${tokenA.symbol} = ${rate.toFixed(4)} ${tokenB.symbol}`,
+      };
     },
     enabled: !!tokenA && !!tokenB,
     refetchInterval: 10000,
   });
 }
+
 
 /*
  * ============================================================
