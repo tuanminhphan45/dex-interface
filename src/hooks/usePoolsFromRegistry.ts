@@ -90,7 +90,6 @@ export function usePoolsFromRegistry() {
     queryKey: ['poolsFromRegistry', REGISTRY_ID],
     queryFn: async (): Promise<PoolData[]> => {
       try {
-        // Get registry object to check pool_count
         const registryObj = await client.getObject({
           id: REGISTRY_ID,
           options: { showContent: true },
@@ -113,20 +112,14 @@ export function usePoolsFromRegistry() {
           return [];
         }
 
-        // Get dynamic fields from the pools table
         const tableId = registryFields.pools.fields.id.id;
         const dynamicFields = await client.getDynamicFields({
           parentId: tableId,
         });
 
-        console.log('Dynamic fields:', dynamicFields.data);
-
         const pools: PoolData[] = [];
-
-        // Fetch each pool info from dynamic fields
         for (const field of dynamicFields.data) {
           try {
-            // Get the dynamic field content (PoolInfo)
             const fieldObj = await client.getDynamicFieldObject({
               parentId: tableId,
               name: field.name,
@@ -140,17 +133,11 @@ export function usePoolsFromRegistry() {
               name: { fields: { type_x: { fields: { name: string } }; type_y: { fields: { name: string } } } };
               value: { fields: { pool_id: string; created_at: string; is_active: boolean } };
             };
-
-            // Pool ID from PoolInfo - handle both string and object formats
             const rawPoolId = poolInfoFields.value.fields.pool_id;
-            // If pool_id is an object with 'id' field, extract it
             const poolId = typeof rawPoolId === 'object' && rawPoolId !== null && 'id' in rawPoolId
               ? (rawPoolId as { id: string }).id
               : rawPoolId as string;
 
-            console.log('Registry pool entry:', { rawPoolId, poolId });
-
-            // Validate pool ID format (should be 0x followed by 64 hex chars)
             const isValidPoolId = typeof poolId === 'string' && /^0x[a-fA-F0-9]{64}$/.test(poolId);
             if (!isValidPoolId) {
               console.warn('Skipping pool with invalid ID:', poolId);
@@ -159,12 +146,9 @@ export function usePoolsFromRegistry() {
 
             const createdAt = parseInt(poolInfoFields.value.fields.created_at);
             const isActive = poolInfoFields.value.fields.is_active;
-
-            // Get the pool key (type names)
             const typeX = poolInfoFields.name.fields.type_x.fields.name;
             const typeY = poolInfoFields.name.fields.type_y.fields.name;
 
-            // Fetch actual pool object to get reserves
             const poolObj = await client.getObject({
               id: poolId,
               options: { showContent: true, showType: true },
@@ -176,8 +160,6 @@ export function usePoolsFromRegistry() {
 
             const poolFields = poolObj.data.content.fields as unknown as PoolContent;
             const poolType = poolObj.data.type || '';
-
-            // Extract type arguments from pool type
             const typeArgs = extractPoolTypeArgs(poolType);
             const actualTypeX = typeArgs?.[0] || typeX;
             const actualTypeY = typeArgs?.[1] || typeY;
